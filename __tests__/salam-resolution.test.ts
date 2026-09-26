@@ -148,6 +148,38 @@ end
     );
   });
 
+  it('links a switch statement\'s bare case labels to the subject enum\'s members', async () => {
+    write('lib/color.salam', `package color
+
+pub enum Color: Red, Green, Blue end
+`);
+    write('app/paint.salam', `import color
+
+func paint(c: color.Color): str:
+    switch c:
+        Red:
+            ret "warm"
+        end
+        Green, Blue:
+            ret "cool"
+        end
+    end
+    ret ""
+end
+`);
+    cg = CodeGraph.initSync(dir);
+    await cg.indexAll();
+    cg.resolveReferences();
+
+    expect(referencedNames('paint', 'app/paint.salam')).toEqual(
+      expect.arrayContaining([
+        'lib/color.salam#Red',
+        'lib/color.salam#Green',
+        'lib/color.salam#Blue',
+      ]),
+    );
+  });
+
   it('finds a symbol by its Persian alias', async () => {
     write('lib/geometry.salam', `@en "geometry"
 @fa "هندسه"

@@ -3,9 +3,10 @@
  *
  * Salam has no tree-sitter grammar here: a lexer + recursive-descent parser
  * follow the compiler's own rules (English and Persian keyword sets, multi-word
- * identifiers, layout DSL). These tests pin the symbols and references that
- * come out, both keyword generations of Persian, and error recovery. Linking
- * those references across files is covered in salam-resolution.test.ts.
+ * identifiers, layout DSL, the `switch` statement). These tests pin the
+ * symbols and references that come out, in both languages, and error
+ * recovery. Linking those references across files is covered in
+ * salam-resolution.test.ts.
  */
 import { describe, it, expect } from 'vitest';
 import { extractFromSource } from '../src/extraction';
@@ -122,9 +123,25 @@ describe('Salam lexer', () => {
     expect(toks).toEqual(['اعشار۶۴', 'نام خانوادگی']);
   });
 
-  it('reads `تا` as until outside a repeat header and `to` inside it', () => {
+  it('reads `تا` as `until` opening a fresh statement and `to` right after a value', () => {
+    // `تا x:` starts a loop (nothing precedes `تا`); inside the repeat header
+    // `1 تا 3` follows the number `1`, a value, so it continues a range.
     const toks = lexSalam('تا x:\nپایان\nتکرار 1 تا 3 از i:\nپایان\n', 'fa').toks.filter((t) => t.t === 'kw').map((t) => t.v);
     expect(toks).toEqual(['until', 'end', 'repeat', 'to', 'in', 'end']);
+  });
+
+  it('reads `تا` as `to` after any value, not just inside a repeat header', () => {
+    // A string switch-case range: '"alpha" تا "mike"' follows a string literal.
+    const afterString = lexSalam('"a" تا "b"', 'fa').toks.filter((t) => t.t === 'kw').map((t) => t.v);
+    expect(afterString).toEqual(['to']);
+    // After a closing paren/bracket, or an identifier, it is still `to`.
+    expect(lexSalam('(f()) تا 3', 'fa').toks.filter((t) => t.t === 'kw').map((t) => t.v)).toEqual(['to']);
+    expect(lexSalam('x تا 3', 'fa').toks.filter((t) => t.t === 'kw').map((t) => t.v)).toEqual(['to']);
+  });
+
+  it('reads the `switch` keyword in both languages', () => {
+    expect(lexSalam('switch', 'en').toks[0]).toMatchObject({ t: 'kw', v: 'switch' });
+    expect(lexSalam('ترابرد', 'fa').toks[0]).toMatchObject({ t: 'kw', v: 'switch' });
   });
 
   it('reads the Persian word operators and punctuation', () => {
@@ -349,6 +366,144 @@ describe('Salam extraction (Persian)', () => {
 `;
     const result = extract('dom.salam', source);
     expect(refs(result, 'calls')).toContain('دام::از شناسه');
+  });
+});
+
+describe('Salam enum', () => {
+  it('allows multi-word enum member names, like a function or variable name', () => {
+    const source = `enum Status: not started, waiting review, done end
+`;
+    const result = extract('status.salam', source);
+    const members = result.nodes.filter((n) => n.kind === 'enum_member').map((n) => n.name);
+    expect(members).toEqual(['not started', 'waiting review', 'done']);
+  });
+
+  it('still rejects a member name that starts with a reserved word, same as a function name', () => {
+    // 'in' is a keyword (repeat/each), so it cannot start a multi-word name here either.
+    const source = `enum Status: in progress end
+`;
+    const ex = new SalamExtractor('bad.salam', source);
+    ex.extract();
+    expect(ex.syntaxErrorMessages.join(' ')).toContain('reserved word');
+  });
+});
+
+describe('Salam switch statement', () => {
+  it('parses literal, multi-value, range and relational cases with fallthrough', () => {
+    const source = `func classify(n: int): str:
+    switch n:
+        1, 2:
+            ret "small"
+        end
+        3 to 9:
+            ret "medium"
+            break
+        end
+        > 100:
+            ret "huge"
+        end
+        else:
+            ret "other"
+        end
+    end
+    ret "unreachable"
+end
+`;
+    const ex = new SalamExtractor('sw.salam', source);
+    const result = ex.extract();
+    expect(ex.syntaxErrorMessages).toEqual([]);
+    expect(byName(result, 'classify')).toMatchObject({ kind: 'function' });
+  });
+
+  it('links a bare case label to the switch subject\'s enum member, in both languages', () => {
+    const en = `enum Color: Red, Green, Blue end
+
+func paint(c: Color): str:
+    switch c:
+        Red:
+            ret "warm"
+        end
+        Green, Blue:
+            ret "cool"
+        end
+    end
+    ret ""
+end
+`;
+    const enResult = extract('paint.salam', en);
+    expect(refs(enResult, 'references')).toEqual(
+      expect.arrayContaining(['Color.Red', 'Color.Green', 'Color.Blue']),
+    );
+
+    const fa = `// زبان: فارسی
+جداشمار رنگ: قرمز, سبز, آبی پایان
+
+روال رنگ‌آمیزی(c: رنگ): رشته:
+    ترابرد c:
+        قرمز:
+            برگشت "گرم"
+        پایان
+        سبز, آبی:
+            برگشت "سرد"
+        پایان
+    پایان
+    برگشت ""
+پایان
+`;
+    const faResult = extract('paint_fa.salam', fa);
+    const ex = new SalamExtractor('paint_fa.salam', fa);
+    ex.extract();
+    expect(ex.syntaxErrorMessages).toEqual([]);
+    expect(refs(faResult, 'references')).toEqual(
+      expect.arrayContaining(['رنگ.قرمز', 'رنگ.سبز', 'رنگ.آبی']),
+    );
+  });
+
+  it('types a variable from an enum-member read, so a later switch on it resolves', () => {
+    const source = `enum Level: Low, High end
+
+func run():
+    lvl := Level.Low
+    switch lvl:
+        Low:
+            println "low"
+        end
+        High:
+            println "high"
+        end
+    end
+end
+`;
+    const result = extract('lvl.salam', source);
+    expect(refs(result, 'references')).toEqual(
+      expect.arrayContaining(['Level.Low', 'Level.High']),
+    );
+  });
+
+  it('never applies the enum-member shorthand to a primitive subject or a known local', () => {
+    const source = `func classify(n: int, threshold: int): str:
+    switch n:
+        lo to hi:
+            ret "in range"
+        end
+        threshold:
+            ret "eq"
+        end
+        else:
+            ret "out"
+        end
+    end
+    ret ""
+end
+
+func band(): int: ret 1 end
+`;
+    const ex = new SalamExtractor('band.salam', source);
+    const result = ex.extract();
+    expect(ex.syntaxErrorMessages).toEqual([]);
+    const references = refs(result, 'references');
+    expect(references).not.toContain('int.threshold');
+    expect(references.some((r) => r.startsWith('int.'))).toBe(false);
   });
 });
 
