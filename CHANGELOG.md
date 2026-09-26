@@ -25,7 +25,7 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### New Features
 
-- **Salam is now a supported language.** CodeGraph indexes `.salam` files in English and in Persian: functions and methods (including multi-word names), structs, interfaces, `impl` blocks, enums, type aliases, globals, `extern` declarations, packages, layout blocks and components, along with calls, type references and imports. `@fa` names are searchable, and a Persian call like `هندسه.مساحت(...)` links to the same function as its English spelling. Imports resolve to packages and files, and a package is followed across every file that declares it.
+- **Salam is now a supported language.** CodeGraph indexes `.salam` files in English and in Persian: functions and methods (including multi-word names), structs, interfaces, `impl` blocks, enums (multi-word members too), type aliases, globals, `extern` declarations, packages, layout blocks and components, the fallthrough `switch`/`case` statement, along with calls, type references and imports. `@fa` names are searchable, a Persian call like `هندسه.مساحت(...)` links to the same function as its English spelling, and a bare `switch` case label on an enum subject links to that enum's member. Imports resolve to packages and files, and a package is followed across every file that declares it.
 
 - **Codex and Astra read project guidance from `AGENTS.md`.** The canonical agent guide now lives in `AGENTS.md` (with a nested `docs/AGENTS.md` for long validation notes); `CLAUDE.md` is a thin `@AGENTS.md` wrapper for Claude Code. Codex/Astra no longer miss the old CLAUDE-only instructions.
 
