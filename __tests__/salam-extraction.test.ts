@@ -280,6 +280,8 @@ describe('Salam extraction (Persian)', () => {
 
   it('reads the renamed Persian keyword set, including repeat with step and index', () => {
     const source = `// زبان: فارسی
+واردسازی رشته
+
 همگانی روال جمع(الف: صحیح, ب: صحیح): صحیح:
     ناپایا مجموع := 0
     تکرار 1 تا 10 هر 2 از i:
@@ -294,6 +296,7 @@ describe('Salam extraction (Persian)', () => {
     const result = ex.extract();
     expect(ex.syntaxErrorMessages).toEqual([]);
     expect(ex.keywordLanguage).toBe('fa2');
+    expect(refs(result, 'imports')).toContain('رشته');
     expect(byName(result, 'جمع')).toMatchObject({ kind: 'function', returnType: 'صحیح' });
     expect(byName(result, 'رنگ')).toMatchObject({ kind: 'enum' });
     expect(result.nodes.filter((n) => n.kind === 'enum_member')).toHaveLength(2);

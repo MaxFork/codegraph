@@ -114,7 +114,7 @@ const FA_KEYWORDS: Array<[string, SalamKeyword | WordOp]> = [
 const FA2_KEYWORDS: Array<[string, SalamKeyword | WordOp]> = [
   ['روال', 'func'], ['برگشت', 'ret'], ['اگر', 'if'], ['وگرنه', 'else'], ['تا', 'until'],
   ['بر', 'on'], ['ناپایا', 'mut'], ['پایا', 'const'], ['گونه', 'type'], ['ساختار', 'struct'],
-  ['جداشمار', 'enum'], ['پایان', 'end'], ['خواندن', 'import'], ['برگردان', 'as'],
+  ['جداشمار', 'enum'], ['پایان', 'end'], ['واردسازی', 'import'], ['برگردان', 'as'],
   ['درست', 'true'], ['نادرست', 'false'], ['پوچ', 'null'], ['این', 'this'], ['بشکن', 'break'],
   ['گذر', 'continue'], ['چیدمان', 'layout'], ['بسته', 'package'], ['چاپ', 'print'],
   ['سرچاپ', 'println'], ['نادرست‌چاپ', 'printerr'], ['نادرست‌سرچاپ', 'printerrln'],
