@@ -33,15 +33,20 @@ import {
  *
  * What it produces:
  *  - `module` for `package`, `function`/`method` (extern and interface
- *    signatures too), `struct`, `interface`, `enum` + `enum_member`, `field`,
- *    `type_alias`, `constant`/`variable`, `import`, `component` (layout blocks
- *    and `component` declarations) and a `namespace` node for every
+ *    signatures too), `struct`, `interface`, `enum` + `enum_member` (multi-word
+ *    names allowed, same as functions), `field`, `type_alias`,
+ *    `constant`/`variable`, `import`, `component` (layout blocks and
+ *    `component` declarations) and a `namespace` node for every
  *    `impl Iface on Type` block.
  *  - `calls`, `instantiates`, `references`, `implements` and `imports`
  *    references. Receivers are typed from parameters, annotations, struct
  *    literals and casts; calls through an imported package become
  *    `pkg::Name`; calls on the built-in Vector/HashMap/... methods are dropped
  *    rather than guessed.
+ *  - `switch`/`case` is a statement (unlike the `match` expression): its
+ *    labels are literals, ranges, relational tests, or — when the subject's
+ *    type is known — a bare enum member name, which is linked the same way
+ *    `EnumName.Member` is.
  *
  * Parsing recovers from syntax errors the way the compiler does (skip to the
  * next statement or declaration keyword), so one bad line never loses a file.
@@ -322,7 +327,7 @@ class SalamFileParser {
 
   private static readonly SYNC_KEYWORDS = new Set([
     'func', 'struct', 'enum', 'type', 'const', 'import', 'layout', 'if', 'until', 'each',
-    'repeat', 'match', 'ret', 'end',
+    'repeat', 'match', 'switch', 'ret', 'end',
   ]);
 
   private sync(): void {
@@ -1127,7 +1132,7 @@ class SalamFileParser {
       if (this.isKw('end') || this.isEof()) break;
       const metasM = this.parseMetas();
       const mTok = this.tk();
-      const mName = this.name('expected enum member name');
+      const mName = this.isId() ? this.munchName() : this.name('expected enum member name');
       const member = mName
         ? this.addNode('enum_member', mName, mTok, {
             visibility: mods.isPub ? 'public' : 'private',
@@ -1776,6 +1781,7 @@ class SalamFileParser {
         case 'each': this.parseEach(); return;
         case 'repeat': this.parseRepeat(); return;
         case 'match': this.parseMatch(); return;
+        case 'switch': this.parseSwitch(); return;
         case 'ret': this.parseReturn(); return;
         case 'defer':
           if (!this.enter()) return;
@@ -1959,6 +1965,69 @@ class SalamFileParser {
       return;
     }
     this.err('expected a pattern (literal, identifier, or type name) in match arm');
+  }
+
+  /**
+   * `switch`: a statement, unlike `match`. Cases fall through to the next one
+   * unless they `break`; labels are literals, ranges (`lo to hi`) or a
+   * relational test (`> x`), or — when the subject's type is known — a bare
+   * enum member name (`red`), the shorthand the compiler expands to
+   * `<SubjectType>.red`.
+   */
+  private static readonly CASE_REL_OPS = new Set(['>', '>=', '<', '<=', '!=', '==']);
+
+  private parseSwitch(): void {
+    if (!this.enter()) return;
+    this.adv();
+    const subj = this.parseCondExpr();
+    this.expectOp(':', '\':\' after switch subject');
+    this.skipTerms();
+    const subjType = subj?.typeName;
+    while (!this.isKw('end') && !this.isEof()) {
+      const before = this.pos;
+      this.parseCase(subjType);
+      this.skipTerms();
+      if (this.panic) this.sync();
+      if (this.pos === before) this.adv();
+    }
+    this.expectKw('end', '\'end\' to close switch');
+    this.leave();
+  }
+
+  private parseCase(subjType: string | undefined): void {
+    if (!this.enter()) return;
+    if (!this.matchKw('else')) {
+      do {
+        this.parseCaseItem(subjType);
+      } while (this.matchOp(','));
+    }
+    this.parseBlock();
+    this.leave();
+  }
+
+  private parseCaseItem(subjType: string | undefined): void {
+    if (this.tk().t === 'op' && SalamFileParser.CASE_REL_OPS.has(this.tk().v)) {
+      this.adv();
+      this.parseCondExpr();
+      return;
+    }
+    // A bare identifier naming a member of the subject's enum type, e.g.
+    // `red:` under `switch c:` where `c` is a `Color` — shorthand for `Color.red`.
+    // Only when the subject's type isn't a primitive/intrinsic (the compiler's
+    // own gate is "subject is an enum") and the name isn't a known local —
+    // `switch n: threshold:` (both `int`) means "compare to the variable
+    // `threshold`", not a member named `threshold`.
+    if (
+      subjType && !PRIMITIVES.has(subjType) && !INTRINSIC_TYPES.has(subjType) &&
+      this.isId() && this.lookupLocal(this.tk().v) === undefined &&
+      !this.isOp('.', 1) && !this.isOp('(', 1) && !this.isKw('to', 1)
+    ) {
+      const nameTok = this.adv();
+      this.addRef('references', `${subjType}.${nameTok.v}`, nameTok);
+      return;
+    }
+    this.parseCondExpr();
+    if (this.matchKw('to')) this.parseCondExpr();
   }
 
   // ---- expressions --------------------------------------------------------------
@@ -2260,7 +2329,10 @@ class SalamFileParser {
       this.addRef('references', this.resolveImportedName(lhs.name, name), memberTok);
     }
     // `Color.Red` reads a member of a type, most often an enum: name it so the
-    // resolver can link the member itself (the receiver is referenced too).
+    // resolver can link the member itself (the receiver is referenced too), and
+    // type the expression as `Color` so `c := Color.Red` types `c` for later use
+    // (e.g. a `switch c:` whose case items are bare member names).
+    let typeName: string | undefined;
     if (
       lhs?.k === 'id' && lhs.name && !this.isOp('(') && name &&
       this.lookupLocal(lhs.name) === undefined && !this.imports.has(lhs.name) &&
@@ -2268,6 +2340,7 @@ class SalamFileParser {
       !this.isTypeParam(lhs.name) && !this.isOp('=') && !this.isOp(':=')
     ) {
       this.addRef('references', `${lhs.name}.${name}`, memberTok);
+      typeName = lhs.name;
     }
     // `pkg.Kind.Round`: the same read through an imported package
     if (
@@ -2277,7 +2350,7 @@ class SalamFileParser {
     ) {
       this.addRef('references', `${lhs.name}.${name}`, memberTok);
     }
-    return { k: 'member', obj: lhs, name, tok: memberTok };
+    return { k: 'member', obj: lhs, name, tok: memberTok, typeName };
   }
 
   private ledCall(callee: Ex | null): Ex {

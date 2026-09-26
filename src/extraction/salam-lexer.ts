@@ -64,7 +64,7 @@ export type SalamKeyword =
   | 'printerr' | 'printerrln' | 'input' | 'defer' | 'operator' | 'extern'
   | 'interface' | 'pub' | 'inline' | 'noinline' | 'pure' | 'noret'
   | 'deprecated' | 'component' | 'repeat' | 'impl' | 'to' | 'step' | 'each'
-  | 'in' | 'with' | 'match';
+  | 'in' | 'with' | 'match' | 'switch';
 
 /** Word operators. Persian spells `&&`, `||`, `==` and `!=` as words. */
 type WordOp = '&&' | '||' | '==' | '!=';
@@ -83,11 +83,13 @@ const EN_KEYWORDS: Array<[string, SalamKeyword]> = [
   ['pure', 'pure'], ['noret', 'noret'], ['deprecated', 'deprecated'],
   ['component', 'component'], ['repeat', 'repeat'], ['impl', 'impl'], ['to', 'to'],
   ['by', 'step'], ['each', 'each'], ['in', 'in'], ['with', 'with'], ['match', 'match'],
+  ['switch', 'switch'],
 ];
 
 /**
  * Persian spellings (`k_kw_spell_fa` in `compiler/langpack.salam`). `تا` is
- * `until` and `to`; the lexer picks by context (`repHeader`). `هر` and `از`
+ * `until` and `to`; the lexer picks by context (`atValueEnd`: right after a
+ * value it continues a range, otherwise it opens a fresh loop). `هر` and `از`
  * double as the `repeat` step and index words (`each` / `in`).
  */
 const FA_KEYWORDS: Array<[string, SalamKeyword | WordOp]> = [
@@ -102,6 +104,7 @@ const FA_KEYWORDS: Array<[string, SalamKeyword | WordOp]> = [
   ['ناب', 'pure'], ['نابرگشت', 'noret'], ['بی‌کاره', 'deprecated'], ['بخش', 'component'],
   ['تکرار', 'repeat'], ['کاربست', 'impl'], ['هر', 'each'], ['از', 'in'],
   ['همخوان', 'match'], ['و', '&&'], ['یا', '||'], ['برابر', '=='], ['نابرابر', '!='],
+  ['ترابرد', 'switch'],
 ];
 
 const ZWNJ = '‌';
@@ -214,7 +217,6 @@ class Lexer {
   private layoutDepth = 0;
   private layoutSub: LayoutSub = LayoutSub.Name;
   private compHeader = false;
-  private repHeader = false;
 
   constructor(private readonly src: string, private readonly lang: SalamLang) {
     this.n = src.length;
@@ -279,7 +281,6 @@ class Lexer {
     this.toks.push(tok);
     this.lastTok = tok;
     this.compHeader = false;
-    this.repHeader = false;
   }
 
   private skipTrivia(): void {
@@ -481,8 +482,9 @@ class Lexer {
     // `input` before a plain word is the start of a name (`ورودی خروجی`), not the keyword.
     if (kw === 'input' && this.inputStartsName(i)) kw = undefined;
     if (this.lang === 'fa') {
-      // `تا` is `to` inside a `repeat` header and `until` everywhere else.
-      if (kw === 'until' && this.repHeader && raw === 'تا') kw = 'to';
+      // `تا` is `to` right after a value (an operand just ended, so this
+      // continues a range) and `until` at the start of a fresh statement.
+      if (kw === 'until' && raw === 'تا' && this.atValueEnd()) kw = 'to';
       // `نادرست چاپ` (with a space) spells the same keyword as `نادرست‌چاپ`.
       if (kw === 'false') {
         const merged = this.spacedKeywordEnd(i);
@@ -504,10 +506,23 @@ class Lexer {
     if (kw) {
       this.push('kw', kw, start, sLine, sCol);
       if (kw === 'component') this.compHeader = true;
-      if (kw === 'repeat') this.repHeader = true;
       return;
     }
     this.push('id', normalizeIdent(raw), start, sLine, sCol);
+  }
+
+  /**
+   * Whether the token just lexed ends a value (a literal, an identifier, or a
+   * closing `)`/`]`) — the position after which Persian `تا` continues a range
+   * (`to`) rather than opening a fresh `until` loop.
+   */
+  private atValueEnd(): boolean {
+    const t = this.lastTok;
+    if (!t) return false;
+    if (t.t === 'num' || t.t === 'str' || t.t === 'id') return true;
+    if (t.t === 'op') return t.v === ')' || t.v === ']';
+    if (t.t === 'kw') return t.v === 'true' || t.v === 'false' || t.v === 'null' || t.v === 'this';
+    return false;
   }
 
   /** Whether the word after `at` (past ASCII spaces) is an ordinary identifier. */
@@ -553,7 +568,6 @@ class Lexer {
     if (v === '(') this.groupDepth++;
     else if (v === ')' && this.groupDepth > 0) this.groupDepth--;
     this.push('op', v, start, sLine, sCol);
-    if (v === ':' && this.groupDepth === 0) this.repHeader = false;
 
     if (v === ':' && ((prev && prev.t === 'kw' && prev.v === 'layout') || (this.compHeader && this.groupDepth === 0))) {
       this.layoutMode = true;
