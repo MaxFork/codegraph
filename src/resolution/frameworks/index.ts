@@ -35,6 +35,7 @@ import { expoRouterResolver } from './expo-router';
 import { fabricViewResolver } from './fabric';
 import { cicsResolver } from './cics';
 import { terraformResolver } from './terraform';
+import { salamResolver } from './salam';
 
 /**
  * All registered framework resolvers
@@ -94,6 +95,8 @@ const FRAMEWORK_RESOLVERS: FrameworkResolver[] = [
   cicsResolver,
   // Terraform / OpenTofu — disambiguate var/local/module/resource refs to same-dir module
   terraformResolver,
+  // Salam — package members reached through English or Persian (`@fa`) package aliases
+  salamResolver,
 ];
 
 /**
