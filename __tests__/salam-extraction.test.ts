@@ -221,6 +221,25 @@ describe('Salam extraction (English)', () => {
     expect(imports).toContain('shapes/math.salam'); // relative to the importing file
   });
 
+  it('names enum member reads so they can be linked', () => {
+    const source = `import geo
+
+enum Color: Red, Green end
+
+func pick(c: Color): int:
+    if c == Color.Red:
+        ret geo.Kind.Round as int
+    end
+    ret 0
+end
+`;
+    const refsOut = refs(extract('c.salam', source), 'references');
+    expect(refsOut).toContain('Color'); // the type itself
+    expect(refsOut).toContain('Color.Red');
+    expect(refsOut).toContain('geo::Kind'); // package-qualified type
+    expect(refsOut).toContain('Kind.Round');
+  });
+
   it('does not reference primitives, type parameters or locals', () => {
     const references = refs(result, 'references');
     for (const primitive of ['int', 'str', 'f64', 'T', 'p', 'total', 'start']) {

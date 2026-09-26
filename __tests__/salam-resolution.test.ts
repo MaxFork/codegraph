@@ -37,6 +37,16 @@ describe('Salam resolution', () => {
     return cg.getCallees(from.id).map((c) => `${c.node.filePath}#${c.node.name}`);
   }
 
+  function referencedNames(fromName: string, file: string): string[] {
+    const from = cg.getNodesInFile(file).find((n) => n.name === fromName);
+    if (!from) throw new Error(`no ${fromName} in ${file}`);
+    return cg
+      .getOutgoingEdges(from.id)
+      .filter((e) => e.kind === 'references')
+      .map((e) => cg.getNode(e.target))
+      .map((n) => `${n?.filePath}#${n?.name}`);
+  }
+
   it('resolves calls through file imports, package spans, package aliases and Persian aliases', async () => {
     write('lib/geometry.salam', `@en "geometry"
 @fa "هندسه"
@@ -85,6 +95,8 @@ end
 pub func Origin(): Point:
     ret Point { x = 0 }
 end
+
+pub enum Kind: Round, Square end
 `);
     write('app/measure.salam', `import shapes
 
@@ -96,6 +108,15 @@ end
 
 func norm(p: shapes.Point): int:
     ret p.shift(1)
+end
+
+enum Mode: Fast, Slow end
+
+func choose(): int:
+    if norm(shapes.Origin()) == 0:
+        ret shapes.Kind.Round as int
+    end
+    ret Mode.Slow as int
 end
 `);
     write('app/fa.salam', `// زبان: فارسی
@@ -121,6 +142,10 @@ end
       expect.arrayContaining(['lib/shapes.salam#length', 'lib/shapes.salam#scale']),
     );
     expect(calleeNames('norm', 'app/measure.salam')).toContain('lib/shapes.salam#shift');
+    // Enum members are linked, in the same package and through an import
+    expect(referencedNames('choose', 'app/measure.salam')).toEqual(
+      expect.arrayContaining(['lib/shapes.salam#Round', 'app/measure.salam#Slow']),
+    );
   });
 
   it('indexes .salam files as their own language', async () => {

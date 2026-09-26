@@ -26,6 +26,7 @@
  *     declares it returns, and the edge exists only if that type has the method.
  *   - `Type.method` — a method on a receiver whose type the extractor knew
  *     (a parameter, an annotation, a struct literal or a cast).
+ *   - `Enum.Member` — a member read off an enum (`Color.Red`).
  */
 
 import type { Node } from '../../types';
@@ -199,6 +200,30 @@ function findBareFunction(name: string, ref: UnresolvedRef, context: ResolutionC
   return fns.length === 1 ? fns[0] : undefined;
 }
 
+/** The member `member` of the enum named `enumName`: this file first, then unique. */
+function enumMember(
+  enumName: string,
+  member: string,
+  ref: UnresolvedRef,
+  context: ResolutionContext,
+): Node | undefined {
+  const tail = `::${enumName}::${member}`;
+  const found = context
+    .getNodesByName(member)
+    .filter(
+      (n) =>
+        n.language === 'salam' &&
+        n.kind === 'enum_member' &&
+        (n.qualifiedName === `${enumName}::${member}` || n.qualifiedName.endsWith(tail)),
+    );
+  const sameFile = found.filter((n) => n.filePath === ref.filePath);
+  if (sameFile.length > 0) return sameFile[0];
+  const dir = dirOf(ref.filePath);
+  const sameDir = found.filter((n) => dirOf(n.filePath) === dir);
+  if (sameDir.length === 1) return sameDir[0];
+  return found.length === 1 ? found[0] : undefined;
+}
+
 /** Methods named `method` declared on `type` (`Type::method`), nearest first. */
 function methodsOnType(
   type: string,
@@ -276,6 +301,14 @@ export const salamResolver: FrameworkResolver = {
     const hit = findQualified(ref, q.pkg, q.member, index, context);
     if (hit) {
       return { original: ref, targetNodeId: hit.node.id, confidence: 0.9, resolvedBy: hit.via };
+    }
+
+    // `Enum.Member`
+    if (ref.referenceKind === 'references') {
+      const member = enumMember(q.pkg, q.member, ref, context);
+      if (member) {
+        return { original: ref, targetNodeId: member.id, confidence: 0.9, resolvedBy: 'framework' };
+      }
     }
 
     // `Type.method` on a receiver typed at extraction

@@ -135,6 +135,9 @@ const CALL_MARK = '\u0001call:';
 
 const MAX_DEPTH = 200;
 
+/** Messages kept per file; the count itself stays exact. */
+const MAX_RECORDED_ERRORS = 50;
+
 function firstLine(text: string, max: number): string {
   const s = text.replace(/\s+/g, ' ').trim();
   return s.length > max ? `${s.slice(0, max - 1)}…` : s;
@@ -159,6 +162,7 @@ class SalamFileParser {
   private noStructLit = false;
   private noWithWord = false;
   private syntaxErrors: Array<{ line: number; message: string }> = [];
+  private syntaxErrorTotal = 0;
 
   private nodes: Node[] = [];
   private edges: Edge[] = [];
@@ -184,7 +188,7 @@ class SalamFileParser {
 
   /** Number of syntax problems met while parsing (exposed for tests). */
   get syntaxErrorCount(): number {
-    return this.syntaxErrors.length;
+    return this.syntaxErrorTotal;
   }
 
   get syntaxErrorMessages(): string[] {
@@ -204,7 +208,7 @@ class SalamFileParser {
       this.finishImpls();
       this.flushLayoutValueRefs();
       const symbols = this.nodes.filter((n) => n.kind !== 'file').length;
-      if (this.syntaxErrors.length > 0 && symbols === 0) {
+      if (this.syntaxErrorTotal > 0 && symbols === 0) {
         const first = this.syntaxErrors[0]!;
         this.errors.push({
           message: `${this.filePath}:${first.line}: ${first.message} — the file is indexed but contributes no symbols`,
@@ -297,7 +301,10 @@ class SalamFileParser {
 
   private err(message: string): void {
     if (this.panic) return;
-    this.syntaxErrors.push({ line: this.tk().line, message });
+    this.syntaxErrorTotal++;
+    if (this.syntaxErrors.length < MAX_RECORDED_ERRORS) {
+      this.syntaxErrors.push({ line: this.tk().line, message });
+    }
     this.panic = true;
   }
 
@@ -2232,6 +2239,24 @@ class SalamFileParser {
       this.lookupLocal(lhs.name) === undefined && this.imports.has(lhs.name)
     ) {
       this.addRef('references', this.resolveImportedName(lhs.name, name), memberTok);
+    }
+    // `Color.Red` reads a member of a type, most often an enum: name it so the
+    // resolver can link the member itself (the receiver is referenced too).
+    if (
+      lhs?.k === 'id' && lhs.name && !this.isOp('(') && name &&
+      this.lookupLocal(lhs.name) === undefined && !this.imports.has(lhs.name) &&
+      !BUILTIN_NAMES.has(lhs.name) && !PRIMITIVES.has(lhs.name) && !INTRINSIC_TYPES.has(lhs.name) &&
+      !this.isTypeParam(lhs.name) && !this.isOp('=') && !this.isOp(':=')
+    ) {
+      this.addRef('references', `${lhs.name}.${name}`, memberTok);
+    }
+    // `pkg.Kind.Round`: the same read through an imported package
+    if (
+      lhs?.k === 'member' && lhs.name && lhs.obj?.k === 'id' && lhs.obj.name && name && !this.isOp('(') &&
+      this.lookupLocal(lhs.obj.name) === undefined && this.imports.has(lhs.obj.name) &&
+      !this.isOp('=') && !this.isOp(':=')
+    ) {
+      this.addRef('references', `${lhs.name}.${name}`, memberTok);
     }
     return { k: 'member', obj: lhs, name, tok: memberTok };
   }
