@@ -120,10 +120,10 @@ func choose(): int:
 end
 `);
     write('app/fa.salam', `// زبان: فارسی
-فراخوانی هندسه
+واردسازی هندسه
 
-کارکرد آغازین:
-    چاپ هندسه.مساحت(2, 3)
+روال ریشه:
+    سرچاپ هندسه.مساحت(2, 3)
 پایان
 `);
     cg = CodeGraph.initSync(dir);
@@ -136,7 +136,7 @@ end
     // Helper lives in a sibling file of the same package
     expect(calleeNames('Twice', 'lib/util.salam')).toContain('lib/util_more.salam#Helper');
     // The Persian spelling reaches the same function
-    expect(calleeNames('آغازین', 'app/fa.salam')).toContain('lib/geometry.salam#Area');
+    expect(calleeNames('ریشه', 'app/fa.salam')).toContain('lib/geometry.salam#Area');
     // A receiver typed by a struct literal, by a factory's return type, and by a parameter
     expect(calleeNames('measure', 'app/measure.salam')).toEqual(
       expect.arrayContaining(['lib/shapes.salam#length', 'lib/shapes.salam#scale']),

@@ -396,13 +396,15 @@ class SalamFileParser {
   private atMergeableWord(): boolean {
     const t = this.tk();
     if (t.t === 'id') return true;
-    if (t.t === 'kw' && isAliasWordKeyword(t.v)) return !(t.v === 'with' && this.noWithWord);
+    if (t.t === 'kw' && isAliasWordKeyword(t.v)) {
+      return !((t.v === 'with' || t.v === 'in') && this.noWithWord);
+    }
     return false;
   }
 
+  /** A member name: any word or keyword, plus the words on its line that merge into it. */
   private munchMemberName(): string {
-    if (!this.atMergeableWord()) {
-      if (this.isId() || this.tk().t === 'kw') return this.textOf(this.adv());
+    if (!this.isId() && this.tk().t !== 'kw') {
       this.err('expected member name after \'.\'');
       return '';
     }
@@ -1602,10 +1604,10 @@ class SalamFileParser {
     }
     const startTok = this.tk();
     const name = this.munchNameOrError('expected external variable name');
-    const node = this.addNode(isMut ? 'variable' : 'constant', name, first, {
+    const node = this.addNode('variable', name, first, {
       isExported: true,
       visibility: 'public',
-      decorators: this.mergeDecorators(['extern'], metas),
+      decorators: this.mergeDecorators(isMut ? ['extern', 'mut'] : ['extern'], metas),
     });
     const prevOwner = this.ownerId;
     if (node) this.ownerId = node.id;
@@ -2364,10 +2366,9 @@ class SalamFileParser {
 }
 
 /**
- * Extracts a `.salam` file. English and the two generations of Persian
- * keywords each need their own lexer pass; the pack that parses the file with
- * the fewest syntax errors wins (usually the first candidate, so a file is
- * parsed once).
+ * Extracts a `.salam` file. English and Persian keywords each need their own
+ * lexer pass; the pack that parses the file with the fewest syntax errors wins
+ * (usually the first candidate, so a file is parsed once).
  */
 export class SalamExtractor {
   private best: SalamFileParser | undefined;

@@ -103,11 +103,13 @@ describe('Salam language detection', () => {
 });
 
 describe('Salam lexer', () => {
-  it('reads keywords from the marker language, not from the other set', () => {
+  it('reads keywords from the chosen language only', () => {
     const en = lexSalam('func main:\nend\n', 'en').toks.filter((t) => t.t === 'kw').map((t) => t.v);
     expect(en).toEqual(['func', 'end']);
-    const fa = lexSalam('کارکرد آغازین:\nپایان\n', 'fa').toks.filter((t) => t.t === 'kw').map((t) => t.v);
+    const fa = lexSalam('روال ریشه:\nپایان\n', 'fa').toks.filter((t) => t.t === 'kw').map((t) => t.v);
     expect(fa).toEqual(['func', 'end']);
+    // `while` is no longer a keyword
+    expect(lexSalam('while', 'en').toks[0]).toMatchObject({ t: 'id' });
   });
 
   it('ends a statement at a newline unless the line continues', () => {
@@ -120,9 +122,25 @@ describe('Salam lexer', () => {
     expect(toks).toEqual(['اعشار۶۴', 'نام خانوادگی']);
   });
 
-  it('reads `تا` as until outside a repeat header and `to` inside it (renamed Persian set)', () => {
-    const toks = lexSalam('تا x:\nپایان\nتکرار 1 تا 3 از i:\nپایان\n', 'fa2').toks.filter((t) => t.t === 'kw').map((t) => t.v);
+  it('reads `تا` as until outside a repeat header and `to` inside it', () => {
+    const toks = lexSalam('تا x:\nپایان\nتکرار 1 تا 3 از i:\nپایان\n', 'fa').toks.filter((t) => t.t === 'kw').map((t) => t.v);
     expect(toks).toEqual(['until', 'end', 'repeat', 'to', 'in', 'end']);
+  });
+
+  it('reads the Persian word operators and punctuation', () => {
+    const ops = lexSalam('الف برابر ب و ج نابرابر د یا ه ؟ x،y', 'fa').toks.filter((t) => t.t === 'op').map((t) => t.v);
+    expect(ops).toEqual(['==', '&&', '!=', '||', '?', ',']);
+    // the punctuation ends the word instead of joining it
+    expect(lexSalam('x،y', 'fa').toks.filter((t) => t.t === 'id').map((t) => t.v)).toEqual(['x', 'y']);
+  });
+
+  it('treats `ورودی` before a plain word as the start of a name, and alone as the keyword', () => {
+    expect(lexSalam('واردسازی ورودی خروجی', 'fa').toks.filter((t) => t.t === 'id').map((t) => t.v)).toEqual(['ورودی', 'خروجی']);
+    expect(lexSalam('x := ورودی()', 'fa').toks.filter((t) => t.t === 'kw').map((t) => t.v)).toEqual(['input']);
+  });
+
+  it('reads `نادرست چاپ` (with a space) as one keyword', () => {
+    expect(lexSalam('نادرست چاپ x', 'fa').toks.filter((t) => t.t === 'kw').map((t) => t.v)).toEqual(['printerr']);
   });
 });
 
@@ -269,24 +287,30 @@ end
 });
 
 describe('Salam extraction (Persian)', () => {
-  it('reads the released Persian keyword set', () => {
+  it('reads Persian source: modules, structs, methods, imports and loops', () => {
     const source = `// زبان: فارسی
 بسته نمونه
 
-فراخوانی رشته
+واردسازی ورودی خروجی
 
 ساختار نقطه:
     همگانی الف: صحیح
-    همگانی کارکرد طول(): صحیح:
-        بازگشت این.الف
+    همگانی روال طول(): صحیح:
+        برگشت این.الف
     پایان
 پایان
 
-همگانی کارکرد آغازین:
-    گذرا مجموع := 0
-    چرخه 3 با i: مجموع = مجموع + i پایان
-    چاپ مجموع
+همگانی روال ریشه:
+    ناپایا مجموع := 0
+    تکرار 1 تا 10 هر 2 از i:
+        اگر مجموع نابرابر 3 و i برابر 1:
+            مجموع = مجموع + i
+        پایان
+    پایان
+    سرچاپ مجموع
 پایان
+
+جداشمار رنگ: قرمز, سبز پایان
 `;
     const ex = new SalamExtractor('nemone.salam', source);
     const result = ex.extract();
@@ -295,58 +319,36 @@ describe('Salam extraction (Persian)', () => {
     expect(byName(result, 'نمونه')).toMatchObject({ kind: 'module' });
     expect(byName(result, 'نقطه')).toMatchObject({ kind: 'struct', qualifiedName: 'نمونه::نقطه' });
     expect(byName(result, 'طول')).toMatchObject({ kind: 'method', returnType: 'صحیح' });
-    expect(byName(result, 'آغازین')).toMatchObject({ kind: 'function', isExported: true });
-  });
-
-  it('reads the renamed Persian keyword set, including repeat with step and index', () => {
-    const source = `// زبان: فارسی
-واردسازی رشته
-
-همگانی روال جمع(الف: صحیح, ب: صحیح): صحیح:
-    ناپایا مجموع := 0
-    تکرار 1 تا 10 هر 2 از i:
-        مجموع = مجموع + i
-    پایان
-    برگشت مجموع + الف + ب
-پایان
-
-جداشمار رنگ: قرمز, سبز پایان
-`;
-    const ex = new SalamExtractor('jam.salam', source);
-    const result = ex.extract();
-    expect(ex.syntaxErrorMessages).toEqual([]);
-    expect(ex.keywordLanguage).toBe('fa2');
-    expect(refs(result, 'imports')).toContain('رشته');
-    expect(byName(result, 'جمع')).toMatchObject({ kind: 'function', returnType: 'صحیح' });
+    expect(byName(result, 'ریشه')).toMatchObject({ kind: 'function', isExported: true });
     expect(byName(result, 'رنگ')).toMatchObject({ kind: 'enum' });
     expect(result.nodes.filter((n) => n.kind === 'enum_member')).toHaveLength(2);
+    expect(refs(result, 'imports')).toContain('ورودی خروجی');
   });
 
-  it('keeps a word that is reserved only in the renamed set usable as a name in the released set', () => {
+  it('no longer reads the removed Persian spellings as keywords', () => {
     const source = `// زبان: فارسی
-گذرا ورودی := 1
+کارکرد := 1
 
-کارکرد آغازین:
-    چاپ ورودی
+روال ریشه:
+    سرچاپ کارکرد
 پایان
 `;
-    const ex = new SalamExtractor('collision.salam', source);
+    const ex = new SalamExtractor('old.salam', source);
     const result = ex.extract();
     expect(ex.syntaxErrorMessages).toEqual([]);
-    expect(ex.keywordLanguage).toBe('fa');
-    expect(byName(result, 'ورودی')).toMatchObject({ kind: 'variable' });
+    expect(byName(result, 'کارکرد')).toMatchObject({ kind: 'variable' });
   });
 
   it('keeps the source spelling of a keyword used inside a member name', () => {
     const source = `// زبان: فارسی
-فراخوانی دام
+واردسازی دام
 
-کارکرد آغازین:
-    دام.با شناسه("a")
+روال ریشه:
+    دام.از شناسه("a")
 پایان
 `;
     const result = extract('dom.salam', source);
-    expect(refs(result, 'calls')).toContain('دام::با شناسه');
+    expect(refs(result, 'calls')).toContain('دام::از شناسه');
   });
 });
 

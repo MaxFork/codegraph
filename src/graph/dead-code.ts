@@ -209,8 +209,7 @@ const IMPLICIT_ENTRY_NAMES: ReadonlySet<string> = new Set([
   'equals',
   'gethashcode',
   'hashcode',
-  // Salam's Persian entry functions (`main` is covered above): released, then renamed
-  'آغازین',
+  // Salam's Persian entry function (`main` is covered above)
   'ریشه',
 ]);
 

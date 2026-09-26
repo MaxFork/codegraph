@@ -17,12 +17,8 @@
  *    scanned line by line as the layout DSL, exactly like the compiler does.
  */
 
-/**
- * Keyword packs. `fa` is the released Persian set, `fa2` the renamed set from
- * the compiler's `change-persian-keywords` work; a Persian file is written in
- * exactly one of them, and the two disagree on which words are reserved.
- */
-export type SalamLang = 'en' | 'fa' | 'fa2';
+/** Keyword packs: English and Persian, as in the compiler's `compiler/langpack.salam`. */
+export type SalamLang = 'en' | 'fa';
 
 export type TokType =
   | 'id' // identifier word
@@ -70,8 +66,9 @@ export type SalamKeyword =
   | 'deprecated' | 'component' | 'repeat' | 'impl' | 'to' | 'step' | 'each'
   | 'in' | 'with' | 'match';
 
-/** Word operators. Persian spells `&&` and `||` as words. */
-type WordOp = '&&' | '||';
+/** Word operators. Persian spells `&&`, `||`, `==` and `!=` as words. */
+type WordOp = '&&' | '||' | '==' | '!=';
+const WORD_OPS = new Set<string>(['&&', '||', '==', '!=']);
 
 // Keyword spellings. Source of truth: `compiler/langpack.salam` (k_kw_spell_*).
 const EN_KEYWORDS: Array<[string, SalamKeyword]> = [
@@ -86,32 +83,14 @@ const EN_KEYWORDS: Array<[string, SalamKeyword]> = [
   ['pure', 'pure'], ['noret', 'noret'], ['deprecated', 'deprecated'],
   ['component', 'component'], ['repeat', 'repeat'], ['impl', 'impl'], ['to', 'to'],
   ['by', 'step'], ['each', 'each'], ['in', 'in'], ['with', 'with'], ['match', 'match'],
-  ['while', 'until'],
-];
-
-/** Released Persian spellings (`k_kw_spell_fa` in `compiler/langpack.salam`). */
-const FA_KEYWORDS: Array<[string, SalamKeyword | WordOp]> = [
-  ['کارکرد', 'func'], ['بازگشت', 'ret'], ['اگر', 'if'], ['وگرنه', 'else'],
-  ['تاهنگام', 'until'], ['بر', 'on'], ['گذرا', 'mut'], ['پایدار', 'const'],
-  ['ریخت', 'type'], ['ساختار', 'struct'], ['شمارش', 'enum'], ['پایان', 'end'],
-  ['فراخوانی', 'import'], ['برگردان', 'as'], ['درست', 'true'], ['نادرست', 'false'],
-  ['پوچ', 'null'], ['این', 'this'], ['بشکن', 'break'], ['بگذر', 'continue'],
-  ['چیدمان', 'layout'], ['بسته', 'package'], ['بنویس', 'print'], ['چاپ', 'println'],
-  ['نادرستینویس', 'printerr'], ['نادرستیچاپ', 'printerrln'], ['بخوان', 'input'],
-  ['دیرکرد', 'defer'], ['کنشگر', 'operator'], ['بیرونی', 'extern'],
-  ['میانجی', 'interface'], ['همگانی', 'pub'], ['توکار', 'inline'], ['جدا', 'noinline'],
-  ['درونزا', 'pure'], ['بی‌بازگشت', 'noret'], ['ازکارافتاده', 'deprecated'],
-  ['سازه', 'component'], ['چرخه', 'repeat'], ['پیاده‌سازی', 'impl'], ['تا', 'to'],
-  ['گام', 'step'], ['هر', 'each'], ['در', 'in'], ['با', 'with'], ['برگزین', 'match'],
-  ['و', '&&'], ['یا', '||'],
 ];
 
 /**
- * Renamed Persian spellings, from the compiler's `change-persian-keywords`
- * work. `تا` is `until` and `to`; the lexer picks by context (`repHeader`).
- * `هر` and `از` double as the `repeat` step and index words (`each`/`in`).
+ * Persian spellings (`k_kw_spell_fa` in `compiler/langpack.salam`). `تا` is
+ * `until` and `to`; the lexer picks by context (`repHeader`). `هر` and `از`
+ * double as the `repeat` step and index words (`each` / `in`).
  */
-const FA2_KEYWORDS: Array<[string, SalamKeyword | WordOp]> = [
+const FA_KEYWORDS: Array<[string, SalamKeyword | WordOp]> = [
   ['روال', 'func'], ['برگشت', 'ret'], ['اگر', 'if'], ['وگرنه', 'else'], ['تا', 'until'],
   ['بر', 'on'], ['ناپایا', 'mut'], ['پایا', 'const'], ['گونه', 'type'], ['ساختار', 'struct'],
   ['جداشمار', 'enum'], ['پایان', 'end'], ['واردسازی', 'import'], ['برگردان', 'as'],
@@ -122,7 +101,7 @@ const FA2_KEYWORDS: Array<[string, SalamKeyword | WordOp]> = [
   ['میانجی', 'interface'], ['همگانی', 'pub'], ['درخط', 'inline'], ['نادرخط', 'noinline'],
   ['ناب', 'pure'], ['نابرگشت', 'noret'], ['بی‌کاره', 'deprecated'], ['بخش', 'component'],
   ['تکرار', 'repeat'], ['کاربست', 'impl'], ['هر', 'each'], ['از', 'in'],
-  ['همخوان', 'match'], ['و', '&&'], ['یا', '||'],
+  ['همخوان', 'match'], ['و', '&&'], ['یا', '||'], ['برابر', '=='], ['نابرابر', '!='],
 ];
 
 const ZWNJ = '‌';
@@ -158,16 +137,12 @@ const FA_EXACT = new Map<string, SalamKeyword | WordOp>(FA_KEYWORDS);
 const FA_FOLDED = new Map<string, SalamKeyword | WordOp>(
   FA_KEYWORDS.map(([k, v]) => [foldKeywordKey(k), v]),
 );
-const FA2_EXACT = new Map<string, SalamKeyword | WordOp>(FA2_KEYWORDS);
-const FA2_FOLDED = new Map<string, SalamKeyword | WordOp>(
-  FA2_KEYWORDS.map(([k, v]) => [foldKeywordKey(k), v]),
-);
 
 export function lookupKeyword(lang: SalamLang, raw: string): SalamKeyword | WordOp | undefined {
   if (lang === 'en') return EN_MAP.get(raw);
-  const exact = (lang === 'fa' ? FA_EXACT : FA2_EXACT).get(raw);
+  const exact = FA_EXACT.get(raw);
   if (exact) return exact;
-  if (hasJoinChar(raw)) return (lang === 'fa' ? FA_FOLDED : FA2_FOLDED).get(foldKeywordKey(raw));
+  if (hasJoinChar(raw)) return FA_FOLDED.get(foldKeywordKey(raw));
   return undefined;
 }
 
@@ -179,9 +154,9 @@ export function canonLinkKind(word: string): string | undefined {
 /** Persian word for `link` (`compiler/langpack.salam`, k_ctx_spell_fa). */
 export const LINK_WORDS = new Set(['link', 'پیوند']);
 
-/** Keywords the compiler lets a multi-word name absorb (`with`, `package`). */
+/** Keywords the compiler lets a multi-word member name absorb. */
 export function isAliasWordKeyword(v: string): boolean {
-  return v === 'with' || v === 'package';
+  return v === 'with' || v === 'package' || v === 'in' || v === 'input' || v === 'repeat' || v === 'component';
 }
 
 function isAsciiDigit(c: number): boolean {
@@ -203,6 +178,11 @@ function isIdentStart(c: number): boolean {
 
 function isIdentCont(c: number): boolean {
   return isIdentStart(c) || isAsciiDigit(c);
+}
+
+/** Persian comma `،` and question mark `؟` end a word and are operators. */
+function isPersianPunct(c: number): boolean {
+  return c === 0x60c || c === 0x61f;
 }
 
 const OPS3 = new Set(['<<=', '>>=', '^^=', '...']);
@@ -483,6 +463,7 @@ class Lexer {
     const c = this.cc();
     let v: string | undefined;
     if (c === 0xff0b) v = '+';
+    else if (c === 0x60c) v = ',';
     else if (c === 0xff0d || c === 0x2212) v = '-';
     else if (c === 0x61f) v = '?';
     if (!v) return false;
@@ -493,11 +474,13 @@ class Lexer {
 
   private scanIdent(start: number, sLine: number, sCol: number): void {
     let i = start;
-    while (i < this.n && isIdentCont(this.src.charCodeAt(i))) i++;
+    while (i < this.n && isIdentCont(this.src.charCodeAt(i)) && !isPersianPunct(this.src.charCodeAt(i))) i++;
     this.off = i;
     let raw = this.src.slice(start, i);
     let kw = lookupKeyword(this.lang, raw);
-    if (this.lang === 'fa2') {
+    // `input` before a plain word is the start of a name (`ورودی خروجی`), not the keyword.
+    if (kw === 'input' && this.inputStartsName(i)) kw = undefined;
+    if (this.lang === 'fa') {
       // `تا` is `to` inside a `repeat` header and `until` everywhere else.
       if (kw === 'until' && this.repHeader && raw === 'تا') kw = 'to';
       // `نادرست چاپ` (with a space) spells the same keyword as `نادرست‌چاپ`.
@@ -505,7 +488,7 @@ class Lexer {
         const merged = this.spacedKeywordEnd(i);
         if (merged > 0) {
           const cand = this.src.slice(start, merged);
-          const k2 = lookupKeyword('fa2', cand);
+          const k2 = lookupKeyword('fa', cand);
           if (k2 === 'printerr' || k2 === 'printerrln') {
             kw = k2;
             raw = cand;
@@ -514,7 +497,7 @@ class Lexer {
         }
       }
     }
-    if (kw === '&&' || kw === '||') {
+    if (kw && WORD_OPS.has(kw)) {
       this.push('op', kw, start, sLine, sCol);
       return;
     }
@@ -525,6 +508,15 @@ class Lexer {
       return;
     }
     this.push('id', normalizeIdent(raw), start, sLine, sCol);
+  }
+
+  /** Whether the word after `at` (past ASCII spaces) is an ordinary identifier. */
+  private inputStartsName(at: number): boolean {
+    const e = this.spacedKeywordEnd(at);
+    if (e === 0) return false;
+    let j = at;
+    while (this.src.charCodeAt(j) === 32) j++;
+    return lookupKeyword(this.lang, this.src.slice(j, e)) === undefined;
   }
 
   /** End of a word that follows `at` after ASCII spaces, or 0. */
@@ -780,21 +772,17 @@ function countKeywords(toks: Tok[]): number {
 
 /**
  * Keyword packs worth trying for a file, best guess first. A `// language:`
- * marker decides between English and Persian; otherwise whichever reads more
- * keywords wins, as in the compiler. Persian has two generations of spellings
- * (see `SalamLang`), so it yields both, ordered by how many keywords each
- * reads; the caller keeps the one that parses without errors.
+ * marker decides; otherwise whichever pack reads more keywords wins, as in the
+ * compiler. The caller keeps the pack that parses the file with the fewest
+ * syntax errors, so a wrong guess costs one extra pass, never a wrong result.
  */
 export function candidateLangs(source: string): SalamLang[] {
   const marker = markerLang(source);
-  if (marker === 'en') return ['en'];
-  if (marker === undefined && !/[\u0600-\u06FF]/.test(source)) return ['en'];
+  if (marker) return [marker];
+  if (!/[\u0600-\u06FF]/.test(source)) return ['en'];
   const fa = countKeywords(finish(source, 'fa').toks);
-  const fa2 = countKeywords(finish(source, 'fa2').toks);
-  const persian: SalamLang[] = fa2 > fa ? ['fa2', 'fa'] : ['fa', 'fa2'];
-  if (marker === 'fa') return persian;
   const en = countKeywords(finish(source, 'en').toks);
-  return Math.max(fa, fa2) > en ? persian : ['en'];
+  return fa > en ? ['fa', 'en'] : ['en', 'fa'];
 }
 
 /** Tokenize a Salam source file with one keyword pack. */
