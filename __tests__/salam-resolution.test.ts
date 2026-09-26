@@ -148,6 +148,23 @@ end
     );
   });
 
+  it('finds a symbol by its Persian alias', async () => {
+    write('lib/geometry.salam', `@en "geometry"
+@fa "هندسه"
+package geometry
+
+@en "Area"
+@fa "مساحت"
+pub func Area(w: int, h: int): int:
+    ret w * h
+end
+`);
+    cg = CodeGraph.initSync(dir);
+    await cg.indexAll();
+    const hit = cg.searchNodes('مساحت').find((r) => r.node.name === 'Area');
+    expect(hit).toBeDefined();
+  });
+
   it('indexes .salam files as their own language', async () => {
     write('a.salam', 'func main:\n    println "hi"\nend\n');
     cg = CodeGraph.initSync(dir);

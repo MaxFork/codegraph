@@ -187,6 +187,26 @@ describe('Salam extraction (English)', () => {
     expect(byName(result, 'Point').docstring).toBe('A 2D point');
   });
 
+  it('ignores banners, directives and test-harness markers as documentation', () => {
+    const source = `/*
+ * Copyright banner
+ */
+
+// EXPECT: E042
+//! mode: layout
+func plain():
+    ret
+end
+
+// Adds one.
+@fa "افزودن"
+func documented(): int: ret 1 end
+`;
+    const result = extract('doc.salam', source);
+    expect(byName(result, 'plain').docstring).toBeUndefined();
+    expect(byName(result, 'documented').docstring).toBe('Adds one.\n@fa افزودن');
+  });
+
   it('links contained members with contains edges', () => {
     const point = byName(result, 'Point');
     const contained = result.edges.filter((e) => e.source === point.id && e.kind === 'contains').map((e) => e.target);

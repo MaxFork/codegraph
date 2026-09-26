@@ -73,6 +73,7 @@ interface Mods {
 interface Meta {
   lang: string;
   value: string;
+  line: number;
 }
 
 interface Binding {
@@ -132,6 +133,9 @@ const ASSIGN_OPS = new Set(['=', '+=', '-=', '*=', '/=', '%=', '^^=', '&=', '|='
 
 /** Local types that name a call instead of a type: `x := f()` is typed by what `f` returns. */
 const CALL_MARK = '\u0001call:';
+
+/** Comment text that is data for the test harness or the editor, not documentation. */
+const DOC_MARKER = /^(?:(?:EXPECT|DEFINE|CONST|انتظار|توقع)\s*:|!)/;
 
 const MAX_DEPTH = 200;
 
@@ -486,28 +490,36 @@ class SalamFileParser {
     });
   }
 
+  /**
+   * The comment block ending on the line above a declaration, plus its
+   * `@fa`/`@en` aliases (so the other spelling is searchable). A copyright
+   * banner at the top of the file, `//!` directives and the test harness's
+   * `EXPECT:` / `DEFINE:` / `CONST:` markers are not documentation.
+   */
   private docFor(first: Tok | undefined, metas: Meta[]): string | undefined {
     const lines: string[] = [];
     if (first) {
-      const banner = this.comments.find((c) => c.block && c.line === 1 && first.line > c.endLine + 1);
-      let expect = first.line - 1;
-      const blockLines: string[] = [];
-      for (let i = this.comments.length - 1; i >= 0; i--) {
+      // Annotations sit between the comment and the declaration.
+      const top = Math.min(first.line, ...metas.map((m) => m.line));
+      // Comments are in source order: find the last one that ends above `top`.
+      let lo = 0;
+      let hi = this.comments.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (this.comments[mid]!.endLine < top) lo = mid + 1;
+        else hi = mid;
+      }
+      let expect = top - 1;
+      for (let i = lo - 1; i >= 0; i--) {
         const c = this.comments[i]!;
-        if (c.endLine > expect || c === banner) {
-          if (c.endLine > expect) continue;
-          break;
-        }
-        if (c.endLine !== expect) break;
-        if (/^(EXPECT|DEFINE|CONST)\b|^[انتظار|توقع]+:|^!/.test(c.text)) break;
-        blockLines.unshift(c.text);
+        if (c.endLine !== expect || (c.block && c.line === 1) || DOC_MARKER.test(c.text)) break;
+        lines.unshift(c.text);
         expect = c.line - 1;
       }
-      lines.push(...blockLines);
     }
     const doc = lines.join('\n').trim();
-    const aliases = metas.map((m) => `@${m.lang} ${m.value}`);
-    const parts = [doc, aliases.join('  ')].filter((s) => s.length > 0);
+    const aliases = metas.map((m) => `@${m.lang} ${m.value}`).join('  ');
+    const parts = [doc, aliases].filter((part) => part.length > 0);
     return parts.length > 0 ? parts.join('\n') : undefined;
   }
 
@@ -589,9 +601,10 @@ class SalamFileParser {
     const out: Meta[] = [];
     this.skipTerms();
     while (this.tk().t === 'meta') {
-      const lang = this.adv().v;
+      const metaTok = this.adv();
+      const lang = metaTok.v;
       if (this.tk().t === 'str') {
-        while (this.tk().t === 'str') out.push({ lang, value: this.stringValue(this.adv().v) });
+        while (this.tk().t === 'str') out.push({ lang, value: this.stringValue(this.adv().v), line: metaTok.line });
       } else {
         this.err('expected a string after \'@\' annotation');
       }
@@ -1582,7 +1595,11 @@ class SalamFileParser {
   }
 
   private parseExternVar(first: Tok, metas: Meta[]): void {
-    const isMut = this.matchKw('mut') || (this.isId() && this.tk().v === 'var' && this.isId(1) && (this.adv(), true));
+    let isMut = this.matchKw('mut');
+    if (!isMut && this.isId() && this.tk().v === 'var' && this.isId(1)) {
+      this.adv();
+      isMut = true;
+    }
     const startTok = this.tk();
     const name = this.munchNameOrError('expected external variable name');
     const node = this.addNode(isMut ? 'variable' : 'constant', name, first, {
